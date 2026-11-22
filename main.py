@@ -1,55 +1,47 @@
 #!/usr/bin/env python3
 """Honey Peach — the picture that tastes of one ingredient.
 
-Writes one image to /output/entry.png: a single honey-drizzled roasted
-peach, caramelised and glistening, shot tight in warm golden light.
-The picture lives in this repo as a fixed asset (peach.png); this
-program copies it byte-for-byte, so every run produces identical
-output. Python 3.13, stdlib only, no network, deterministic.
+Reads peach.png (1024x1024, <=1 MiB) from the repository root and writes it
+byte-for-byte to /output/entry.png.
 """
-
 import hashlib
 import os
-import sys
+import struct
 
-ASSET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "peach.png")
-OUTPUT = "/output/entry.png"
-EXPECTED_WIDTH = 1024
-EXPECTED_HEIGHT = 1024
-MAX_BYTES = 1_048_576
-
-
-def read_asset() -> bytes:
-    with open(ASSET, "rb") as handle:
-        return handle.read()
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "peach.png")
+DST = "/output/entry.png"
+MAX_BYTES = 1 << 20  # 1 MiB
 
 
-def check_png(data: bytes) -> None:
-    """Assert the asset is a 1024x1024 PNG under the 1 MiB cap."""
-    assert data[:8] == b"\x89PNG\r\n\x1a\n", "asset is not a PNG"
-    assert len(data) <= MAX_BYTES, f"asset is {len(data)} bytes, over 1 MiB"
-    width = int.from_bytes(data[16:20], "big")
-    height = int.from_bytes(data[20:24], "big")
-    assert (width, height) == (EXPECTED_WIDTH, EXPECTED_HEIGHT), (
-        f"asset is {width}x{height}, expected "
-        f"{EXPECTED_WIDTH}x{EXPECTED_HEIGHT}"
-    )
+def read_png_header(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit("peach.png is not a PNG file")
+    if len(data) < 24:
+        raise SystemExit("peach.png is too short to be a PNG file")
+    width, height = struct.unpack(">II", data[16:24])
+    return data, width, height
 
 
-def main() -> int:
-    data = read_asset()
-    check_png(data)
-    os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
-    with open(OUTPUT, "wb") as handle:
-        handle.write(data)
-    # Verify the write: re-read the output and confirm it is byte-identical.
-    with open(OUTPUT, "rb") as handle:
-        written = handle.read()
-    assert written == data, "output differs from the asset"
-    digest = hashlib.sha256(data).hexdigest()
-    print(f"wrote {OUTPUT} ({len(data)} bytes, sha256 {digest})")
-    return 0
+def main():
+    data, width, height = read_png_header(SRC)
+    if (width, height) != (1024, 1024):
+        raise SystemExit(f"peach.png is {width}x{height}, expected 1024x1024")
+    if len(data) > MAX_BYTES:
+        raise SystemExit(f"peach.png is {len(data)} bytes, over the 1 MiB limit")
+    os.makedirs(os.path.dirname(DST), exist_ok=True)
+    with open(DST, "wb") as f:
+        f.write(data)
+    # Verify-after-write: re-read the output and assert it is byte-identical.
+    with open(DST, "rb") as f:
+        written = f.read()
+    if written != data:
+        raise SystemExit("verification failed: /output/entry.png differs from peach.png")
+    print(f"wrote {DST}: {len(data)} bytes, 1024x1024, "
+          f"sha256={hashlib.sha256(data).hexdigest()}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
